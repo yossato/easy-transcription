@@ -56,9 +56,13 @@ def monitor_audio():
 
 def update_level_meter():
     """
-    current_level のリニアな値をもとに、Canvas上に緑色のレベルメーターを描画します。
+    録音中なら current_level のリニアな値を基に、録音していないときはバーをゼロにして、
+    Canvas上に緑色のレベルメーターを描画します。
     """
-    level_ratio = min(current_level / LEVEL_METER_MAX, 1.0)
+    if not is_recording:
+        level_ratio = 0
+    else:
+        level_ratio = min(current_level / LEVEL_METER_MAX, 1.0)
     meter_fill_width = int(METER_WIDTH * level_ratio)
     meter_canvas.delete("all")
     meter_canvas.create_rectangle(0, 0, meter_fill_width, METER_HEIGHT, fill="green")
@@ -98,8 +102,8 @@ def on_tree_double_click(event):
 # ----------------- 文字起こし処理 -----------------
 def process_srt(srt_file, source):
     """
-    whisperkit-cli により出力された SRT ファイルから不要な番号・タイムスタンプ行、タグを除去し、
-    テキストを抽出して Treeview に追加します。改行はそのまま保持します。
+    whisperkit-cli により出力されたSRTファイルから不要な番号・タイムスタンプ行、タグを除去し、
+    テキストを抽出してTreeviewに追加します。改行はそのまま保持します。
     """
     if os.path.exists(srt_file):
         with open(srt_file, "r", encoding="utf-8") as f:
@@ -122,8 +126,8 @@ def process_srt(srt_file, source):
 
 def process_transcription(file_path, source):
     """
-    指定された WAV ファイルを whisperkit-cli に渡して文字起こしを実行し、
-    結果の SRT ファイルからテキストを抽出して Treeview に表示します。
+    指定されたWAVファイルをwhisperkit-cliに渡して文字起こしを実行し、
+    結果のSRTファイルからテキストを抽出してTreeviewに表示します。
     """
     with tempfile.TemporaryDirectory() as temp_dir:
         base = os.path.splitext(os.path.basename(file_path))[0]
@@ -146,7 +150,7 @@ def process_transcription(file_path, source):
 
 def transcription_worker():
     """
-    transcription_queue に積まれた各 WAV ファイルを順次処理するワーカースレッドです。
+    transcription_queue に積まれた各WAVファイルを順次処理するワーカースレッドです。
     処理後、一時ファイルは削除します。
     """
     while True:
@@ -159,7 +163,7 @@ def transcription_worker():
 
 def queue_recording():
     """
-    現在の録音データ（frames）を、一意の一時 WAV ファイルとして保存し、
+    現在の録音データ（frames）を、一意の一時WAVファイルとして保存し、
     そのファイルパスとソース情報を transcription_queue に追加します。
     """
     global frames
@@ -201,7 +205,7 @@ def stop_recording():
 
 # ----------------- GUI の構築 -----------------
 root = tk.Tk()
-root.title("WhisperKit 文字起こし")
+root.title("WhisperKit 文字起こし（録音のみ・表形式）")
 
 # 録音操作用ボタン（個別ボタン：開始／停止）
 button_frame = tk.Frame(root)
