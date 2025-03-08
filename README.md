@@ -1,4 +1,4 @@
-# WhisperKit 文字起こしアプリ
+# WhisperKit 文字起こしGUI
 
 このアプリは、マイクからの音声録音を行い、[WhisperKit](https://github.com/your-repo/whisperkit) を利用して文字起こしを実施する Python ベースの GUI アプリケーションです。  
 録音した音声は一時的に WAV ファイルとして保存され、バックグラウンドで文字起こしが実行されます。  
@@ -72,7 +72,7 @@
      brew install whisperkit-cli
      ```
 
-     せっかくHomebrewでWhisperKitをダウンロードするのですが、事前にソースコードもダウンロードしてきて[whisperKitのディレクトリにおいて、makeコマンドでモデルをダウンロードしておく必要があります](https://github.com/argmaxinc/WhisperKit?tab=readme-ov-file#swift-cli)。
+     せっかくHomebrewでWhisperKitをダウンロードするのですが、事前にソースコードもダウンロードしてきて[whisperKitのディレクトリに移動して、makeコマンドでモデルをダウンロードしておく必要があります](https://github.com/argmaxinc/WhisperKit?tab=readme-ov-file#swift-cli)。
      ```bash
      make setup
      make download-model MODEL=large-v3 

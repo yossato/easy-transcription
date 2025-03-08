@@ -201,7 +201,7 @@ def stop_recording():
 
 # ----------------- GUI の構築 -----------------
 root = tk.Tk()
-root.title("WhisperKit 文字起こし（録音のみ・表形式）")
+root.title("WhisperKit 文字起こし")
 
 # 録音操作用ボタン（個別ボタン：開始／停止）
 button_frame = tk.Frame(root)
