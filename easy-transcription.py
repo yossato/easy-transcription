@@ -71,13 +71,17 @@ def add_transcription_row(source, transcript):
     タイムスタンプと文字起こし結果を1行としてTreeviewに追加します。
     表示用の文字列は改行をスペースに置換した1行のものとし、
     完全な文字起こし結果（改行付き）は full_transcriptions に保持します。
-    新しい行は常に最上段に追加されます。
+    また、最新の結果は自動的にクリップボードにコピーされます。
     """
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     display_text = transcript.replace("\n", " ")
-    # 新しい行を index "0" に追加して最新行を上部に配置
+    # 新しい行を index "0" に追加（最新行が上に来る）
     item_id = tree.insert("", 0, values=(timestamp, display_text))
     full_transcriptions[item_id] = transcript
+    # 最新結果を自動コピー
+    root.clipboard_clear()
+    root.clipboard_append(transcript)
+    print("最新の文字起こし結果をクリップボードにコピーしました。")
 
 def on_tree_double_click(event):
     """
@@ -221,7 +225,7 @@ tree.heading("timestamp", text="Timestamp")
 tree.heading("transcription", text="Transcription")
 tree.column("timestamp", width=150)
 tree.column("transcription", width=500)
-# 新しい行が上部に追加されるので、Treeviewは最新の結果が常に上に表示されます
+# 新しい行を上部に追加するので、最新の結果が常に最上段に表示されます
 tree.pack(side="left", fill="both", expand=True)
 scrollbar.config(command=tree.yview)
 tree.bind("<Double-1>", on_tree_double_click)
