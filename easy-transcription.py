@@ -20,6 +20,9 @@ is_recording = False     # 録音中かどうかのフラグ
 frames = []              # 録音中の音声データ（録音開始後にのみ追加）
 current_level = 0        # 各チャンクの最大値
 
+# レベルメーターの最終描画値（再描画の最適化用）
+last_meter_fill_width = -1
+
 # 録音したWAVファイルのパスを積むキュー（(ファイルパス, ソース) のタプル）
 transcription_queue = queue.Queue()
 
@@ -34,8 +37,7 @@ LEVEL_METER_MAX = 32767  # 16bitの最大値
 # ----------------- マイク入力とリニアレベルメーター -----------------
 def monitor_audio():
     """
-    常時マイクから音声を取得し、各チャンクのリニアな最大値を current_level に更新します。
-    録音中の場合は frames にも追加します。
+    録音中のみマイクから音声を取得し、各チャンクのリニアな最大値を current_level に更新します。
     """
     global current_level, frames, is_recording
     CHUNK = 1024
@@ -45,52 +47,52 @@ def monitor_audio():
     pa = pyaudio.PyAudio()
     stream = pa.open(format=FORMAT, channels=CHANNELS, rate=RATE,
                      input=True, frames_per_buffer=CHUNK)
-    while True:
+    while is_recording:
         try:
             data = stream.read(CHUNK, exception_on_overflow=False)
         except Exception:
             continue
         current_level = audioop.max(data, 2)
-        if is_recording:
-            frames.append(data)
+        frames.append(data)
+    # 録音が終了したらストリームを停止・終了する
+    stream.stop_stream()
+    stream.close()
+    pa.terminate()
 
 def update_level_meter():
     """
-    録音中なら current_level のリニアな値を基に、録音していないときはバーをゼロにして、
-    Canvas上に緑色のレベルメーターを描画します。
+    録音中は50ms、録音していないときは500ms間隔でレベルメーターを更新します。
+    また、前回描画した値と同じ場合はキャンバスの再描画をスキップし、無駄な処理を削減します。
     """
-    if not is_recording:
-        level_ratio = 0
-    else:
+    global last_meter_fill_width
+    if is_recording:
         level_ratio = min(current_level / LEVEL_METER_MAX, 1.0)
+        interval = 50  # 録音中は短い間隔で更新
+    else:
+        level_ratio = 0
+        interval = 500  # 録音していない場合は更新間隔を延ばす
+
     meter_fill_width = int(METER_WIDTH * level_ratio)
-    meter_canvas.delete("all")
-    meter_canvas.create_rectangle(0, 0, meter_fill_width, METER_HEIGHT, fill="green")
-    meter_canvas.create_rectangle(0, 0, METER_WIDTH, METER_HEIGHT, outline="black")
-    root.after(50, update_level_meter)
+    # 前回の描画と同じ場合は再描画をスキップ
+    if meter_fill_width != last_meter_fill_width:
+        meter_canvas.delete("all")
+        meter_canvas.create_rectangle(0, 0, meter_fill_width, METER_HEIGHT, fill="green")
+        meter_canvas.create_rectangle(0, 0, METER_WIDTH, METER_HEIGHT, outline="black")
+        last_meter_fill_width = meter_fill_width
+
+    root.after(interval, update_level_meter)
 
 # ----------------- 文字起こし結果表示用（Treeview） -----------------
 def add_transcription_row(source, transcript):
-    """
-    タイムスタンプと文字起こし結果を1行としてTreeviewに追加します。
-    表示用の文字列は改行をスペースに置換した1行のものとし、
-    完全な文字起こし結果（改行付き）は full_transcriptions に保持します。
-    また、最新の結果は自動的にクリップボードにコピーされます。
-    """
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     display_text = transcript.replace("\n", " ")
-    # 新しい行を index "0" に追加（最新行が上に来る）
     item_id = tree.insert("", 0, values=(timestamp, display_text))
     full_transcriptions[item_id] = transcript
-    # 最新結果を自動コピー
     root.clipboard_clear()
     root.clipboard_append(transcript)
     print("最新の文字起こし結果をクリップボードにコピーしました。")
 
 def on_tree_double_click(event):
-    """
-    Treeview の行をダブルクリックすると、その行の完全な文字起こし結果（改行付き）をクリップボードにコピーします。
-    """
     item_id = tree.focus()
     if not item_id:
         return
@@ -101,10 +103,6 @@ def on_tree_double_click(event):
 
 # ----------------- 文字起こし処理 -----------------
 def process_srt(srt_file, source):
-    """
-    whisperkit-cli により出力されたSRTファイルから不要な番号・タイムスタンプ行、タグを除去し、
-    テキストを抽出してTreeviewに追加します。改行はそのまま保持します。
-    """
     if os.path.exists(srt_file):
         with open(srt_file, "r", encoding="utf-8") as f:
             lines = f.readlines()
@@ -125,10 +123,6 @@ def process_srt(srt_file, source):
         add_transcription_row(source, "SRTファイルが見つかりませんでした。")
 
 def process_transcription(file_path, source):
-    """
-    指定されたWAVファイルをwhisperkit-cliに渡して文字起こしを実行し、
-    結果のSRTファイルからテキストを抽出してTreeviewに表示します。
-    """
     with tempfile.TemporaryDirectory() as temp_dir:
         base = os.path.splitext(os.path.basename(file_path))[0]
         whisperkit_cmd = [
@@ -149,10 +143,6 @@ def process_transcription(file_path, source):
         process_srt(srt_file, source)
 
 def transcription_worker():
-    """
-    transcription_queue に積まれた各WAVファイルを順次処理するワーカースレッドです。
-    処理後、一時ファイルは削除します。
-    """
     while True:
         file_path, source = transcription_queue.get()
         try:
@@ -162,10 +152,6 @@ def transcription_worker():
             transcription_queue.task_done()
 
 def queue_recording():
-    """
-    現在の録音データ（frames）を、一意の一時WAVファイルとして保存し、
-    そのファイルパスとソース情報を transcription_queue に追加します。
-    """
     global frames
     temp_file = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
     temp_file_name = temp_file.name
@@ -180,34 +166,28 @@ def queue_recording():
 
 # ----------------- 録音開始・停止（個別ボタン） -----------------
 def start_recording():
-    """
-    録音開始ボタンの処理です。録音開始時は frames をクリアし、録音状態にし、
-    録音開始ボタンを無効、停止ボタンを有効にします。
-    """
-    global is_recording, frames
+    global is_recording, frames, monitor_thread
     if not is_recording:
         frames = []
         is_recording = True
         start_button.config(state="disabled")
         stop_button.config(state="normal")
+        # 録音開始時にマイク監視スレッドを起動
+        monitor_thread = threading.Thread(target=monitor_audio, daemon=True)
+        monitor_thread.start()
 
 def stop_recording():
-    """
-    録音停止ボタンの処理です。録音状態を解除し、停止ボタンを無効、開始ボタンを有効にし、
-    録音データを一時ファイルに保存してキューに追加します。
-    """
     global is_recording
     if is_recording:
-        is_recording = False
+        is_recording = False  # monitor_audioのループ条件を外す
         start_button.config(state="normal")
         stop_button.config(state="disabled")
         queue_recording()
 
 # ----------------- GUI の構築 -----------------
 root = tk.Tk()
-root.title("WhisperKit 文字起こし（録音のみ・表形式）")
+root.title("WhisperKit 文字起こし")
 
-# 録音操作用ボタン（個別ボタン：開始／停止）
 button_frame = tk.Frame(root)
 button_frame.pack(pady=10)
 start_button = tk.Button(button_frame, text="録音開始", command=start_recording)
@@ -215,11 +195,9 @@ start_button.pack(side="left", padx=5)
 stop_button = tk.Button(button_frame, text="録音停止", command=stop_recording, state="disabled")
 stop_button.pack(side="left", padx=5)
 
-# レベルメーター表示用キャンバス
 meter_canvas = tk.Canvas(root, width=METER_WIDTH, height=METER_HEIGHT, bg="white")
 meter_canvas.pack(pady=10)
 
-# Treeview とスクロールバーを含むフレームの作成（表形式表示）
 tree_frame = tk.Frame(root)
 tree_frame.pack(fill="both", expand=True, padx=10, pady=10)
 scrollbar = ttk.Scrollbar(tree_frame, orient="vertical")
@@ -229,16 +207,10 @@ tree.heading("timestamp", text="Timestamp")
 tree.heading("transcription", text="Transcription")
 tree.column("timestamp", width=150)
 tree.column("transcription", width=500)
-# 新しい行を上部に追加するので、最新の結果が常に最上段に表示されます
 tree.pack(side="left", fill="both", expand=True)
 scrollbar.config(command=tree.yview)
 tree.bind("<Double-1>", on_tree_double_click)
 
-# ----------------- スレッド開始 -----------------
-monitor_thread = threading.Thread(target=monitor_audio, daemon=True)
-monitor_thread.start()
+threading.Thread(target=transcription_worker, daemon=True).start()
 root.after(50, update_level_meter)
-worker_thread = threading.Thread(target=transcription_worker, daemon=True)
-worker_thread.start()
-
 root.mainloop()
