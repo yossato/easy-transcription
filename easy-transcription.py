@@ -11,6 +11,7 @@ import wave
 import audioop
 import queue
 from datetime import datetime
+import json
 
 # WhisperKitのモデルへのパス（環境に合わせて変更してください）
 MODEL = "/Users/yoshiaki/Projects/whisperkit/Models/whisperkit-coreml/openai_whisper-large-v3-v20240930_626MB"
@@ -33,6 +34,24 @@ full_transcriptions = {}
 METER_WIDTH = 300
 METER_HEIGHT = 30
 LEVEL_METER_MAX = 32767  # 16bitの最大値
+# NGワード設定のためのグローバル変数と関数
+NG_WORDS_FILE = os.path.join(os.path.dirname(__file__), "ng_words.json")
+ng_words = []
+
+def load_ng_words():
+    global ng_words
+    if os.path.exists(NG_WORDS_FILE):
+        with open(NG_WORDS_FILE, "r", encoding="utf-8") as f:
+            try:
+                ng_words = json.load(f)
+            except Exception:
+                ng_words = []
+    else:
+        ng_words = []
+
+def save_ng_words():
+    with open(NG_WORDS_FILE, "w", encoding="utf-8") as f:
+        json.dump(ng_words, f, ensure_ascii=False, indent=2)
 
 # ----------------- マイク入力とリニアレベルメーター -----------------
 def monitor_audio():
@@ -118,6 +137,9 @@ def process_srt(srt_file, source):
                 continue
             processed_lines.append(line)
         transcript = "\n".join(processed_lines)
+        # NGワードを削除（スペースに置換）
+        for ng in ng_words:
+            transcript = transcript.replace(ng, " ")
         add_transcription_row(source, transcript)
     else:
         add_transcription_row(source, "SRTファイルが見つかりませんでした。")
@@ -150,6 +172,49 @@ def transcription_worker():
         finally:
             os.remove(file_path)
             transcription_queue.task_done()
+
+def open_settings():
+    settings_window = tk.Toplevel(root)
+    settings_window.title("設定")
+    settings_window.resizable(False, False)
+
+    # NGワードを表示するListboxを作成
+    listbox = tk.Listbox(settings_window, width=50, height=10)
+    listbox.grid(row=0, column=0, columnspan=3, padx=10, pady=10)
+
+    for word in ng_words:
+        listbox.insert(tk.END, word)
+
+    # 新しいNGワード入力用のEntryウィジェット
+    entry = tk.Entry(settings_window, width=40)
+    entry.grid(row=1, column=0, padx=10, pady=5, columnspan=2)
+
+    def add_word():
+        new_word = entry.get().strip()
+        if new_word and new_word not in ng_words:
+            ng_words.append(new_word)
+            listbox.insert(tk.END, new_word)
+            save_ng_words()
+            entry.delete(0, tk.END)
+   
+    def delete_word():
+        selected_indices = listbox.curselection()
+        if selected_indices:
+            for index in reversed(selected_indices):
+                word = listbox.get(index)
+                if word in ng_words:
+                    ng_words.remove(word)
+                listbox.delete(index)
+            save_ng_words()
+   
+    add_button = tk.Button(settings_window, text="追加", command=add_word)
+    add_button.grid(row=1, column=2, padx=10, pady=5)
+
+    delete_button = tk.Button(settings_window, text="削除", command=delete_word)
+    delete_button.grid(row=2, column=0, padx=10, pady=5)
+
+    close_button = tk.Button(settings_window, text="閉じる", command=settings_window.destroy)
+    close_button.grid(row=2, column=2, padx=10, pady=5)
 
 def queue_recording():
     global frames
@@ -188,12 +253,23 @@ def stop_recording():
 root = tk.Tk()
 root.title("WhisperKit 文字起こし")
 
-button_frame = tk.Frame(root)
-button_frame.pack(pady=10)
-start_button = tk.Button(button_frame, text="録音開始", command=start_recording)
+top_frame = tk.Frame(root)
+top_frame.pack(fill="x", padx=10, pady=10)
+# Configure three columns: left spacer, center for record buttons, right for settings button
+top_frame.columnconfigure(0, weight=1)
+top_frame.columnconfigure(1, weight=0)
+top_frame.columnconfigure(2, weight=1)
+
+record_frame = tk.Frame(top_frame)
+record_frame.grid(row=0, column=1)
+
+start_button = tk.Button(record_frame, text="録音開始", command=start_recording)
 start_button.pack(side="left", padx=5)
-stop_button = tk.Button(button_frame, text="録音停止", command=stop_recording, state="disabled")
+stop_button = tk.Button(record_frame, text="録音停止", command=stop_recording, state="disabled")
 stop_button.pack(side="left", padx=5)
+
+settings_button = tk.Button(top_frame, text="⚙", command=open_settings)
+settings_button.grid(row=0, column=2, sticky="e")
 
 meter_canvas = tk.Canvas(root, width=METER_WIDTH, height=METER_HEIGHT, bg="white")
 meter_canvas.pack(pady=10)
@@ -213,4 +289,5 @@ tree.bind("<Double-1>", on_tree_double_click)
 
 threading.Thread(target=transcription_worker, daemon=True).start()
 root.after(50, update_level_meter)
+load_ng_words()
 root.mainloop()
